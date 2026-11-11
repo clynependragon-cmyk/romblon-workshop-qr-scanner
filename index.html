@@ -1,0 +1,244 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Romblon Workshop | Attendance Scanner</title>
+
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f3f7f7;
+      margin: 0;
+      padding: 20px;
+      color: #263238;
+    }
+
+    .container {
+      max-width: 520px;
+      margin: auto;
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px #00000012;
+    }
+
+    h2 { color: #168f96; text-align: center; }
+
+    input, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 13px;
+      margin: 8px 0;
+      border-radius: 6px;
+      font-size: 16px;
+    }
+
+    input { border: 1px solid #ccc; }
+
+    button {
+      background: #27aeb4;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:disabled { opacity: .5; }
+
+    .section {
+      margin-top: 22px;
+      padding-top: 15px;
+      border-top: 1px solid #ddd;
+    }
+
+    #status {
+      padding: 14px;
+      background: #edf5f5;
+      border-radius: 6px;
+      margin-top: 15px;
+      text-align: center;
+      white-space: pre-line;
+    }
+
+    .hidden { display: none; }
+
+    small { color: #667; }
+  </style>
+</head>
+
+<body>
+<div class="container">
+
+  <h2>Romblon Workshop</h2>
+  <p style="text-align:center">Attendance Scanner</p>
+
+  <div id="login">
+    <p>Enter the shared staff access PIN.</p>
+    <input id="pin" type="password" placeholder="Staff PIN">
+    <button onclick="login()">Access Scanner</button>
+  </div>
+
+  <div id="scanner" class="hidden">
+
+    <div class="section">
+      <h3>Camera Scanner</h3>
+      <div id="reader"></div>
+      <small>Allow camera access when prompted.</small>
+    </div>
+
+    <div class="section">
+      <h3>USB QR Scanner</h3>
+      <p>Click the box, scan the participant's QR code, then wait for the result.</p>
+      <input
+        id="usbInput"
+        type="text"
+        placeholder="Click here before scanning"
+        autocomplete="off"
+      >
+    </div>
+
+    <div id="status">Scanner ready.</div>
+
+    <button onclick="logout()" style="background:#666">
+      Lock Scanner
+    </button>
+  </div>
+
+</div>
+
+<script>
+  // YOUR DEPLOYED APPS SCRIPT WEB APP URL
+  const WEB_APP_URL =
+    'https://script.google.com/macros/s/AKfycbwV4H4eKpy4n-keqvkH05EW3nbi4yggaNVyAi-gHmEKxWFA0IkOzM0lBtwuFI5M1UfRug/exec';
+
+  let staffPin = '';
+  let busy = false;
+  let camera = null;
+
+  function login() {
+    const enteredPin = document.getElementById('pin').value;
+
+    if (enteredPin.length < 8) {
+      alert('Please enter your staff PIN.');
+      return;
+    }
+
+    staffPin = enteredPin;
+
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('scanner').classList.remove('hidden');
+
+    document.getElementById('status').textContent =
+      'Scanner ready.';
+
+    startCamera();
+    document.getElementById('usbInput').focus();
+  }
+
+  function startCamera() {
+    if (typeof Html5Qrcode === 'undefined') {
+      showStatus('Camera scanner library could not load.');
+      return;
+    }
+
+    camera = new Html5Qrcode('reader');
+
+    camera.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      decodedText => submitScan(decodedText),
+      () => {}
+    ).catch(error => {
+      showStatus('Camera unavailable. You can still use the USB scanner.');
+    });
+  }
+
+  document.getElementById('usbInput')
+    .addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+
+        const token = this.value.trim();
+        this.value = '';
+
+        if (token) submitScan(token);
+      }
+    });
+
+  function submitScan(token) {
+    if (busy || !staffPin) return;
+
+    busy = true;
+    showStatus('Checking QR code...');
+
+    const callbackName =
+      'qrCallback' + Date.now() + Math.floor(Math.random() * 1000);
+
+    const script = document.createElement('script');
+
+    const params = new URLSearchParams({
+      action: 'scan',
+      token: token,
+      pin: staffPin,
+      callback: callbackName
+    });
+
+    window[callbackName] = function(result) {
+      if (result.success) {
+        showStatus(
+          'ATTENDANCE RECORDED\n\n' +
+          result.name + '\n' +
+          result.designation + '\n' +
+          result.office + '\n\n' +
+          result.date + ' | ' + result.time
+        );
+      } else {
+        showStatus(result.message || 'Scan unsuccessful.');
+      }
+
+      cleanup();
+    };
+
+    script.src = WEB_APP_URL + '?' + params.toString();
+
+    script.onerror = function() {
+      showStatus('Unable to connect. Please try again.');
+      cleanup();
+    };
+
+    function cleanup() {
+      delete window[callbackName];
+      script.remove();
+      busy = false;
+      document.getElementById('usbInput').focus();
+    }
+
+    document.body.appendChild(script);
+  }
+
+  function showStatus(message) {
+    document.getElementById('status').textContent = message;
+  }
+
+  function logout() {
+    if (camera) {
+      camera.stop().catch(() => {});
+    }
+
+    camera = null;
+    staffPin = '';
+    busy = false;
+
+    document.getElementById('scanner').classList.add('hidden');
+    document.getElementById('login').classList.remove('hidden');
+    document.getElementById('pin').value = '';
+
+    showStatus('Scanner locked.');
+  }
+</script>
+
+</body>
+</html>
